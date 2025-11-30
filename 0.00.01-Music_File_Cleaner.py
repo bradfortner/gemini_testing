@@ -19,21 +19,22 @@ def search_discogs(query, search_type='release'):
     try:
         results = d.search(query, type=search_type)
         if results:
-            for i, result in enumerate(results[:5]): # Limit to first 5 results
+            print(f"Found {results.count} results. Showing the first 5:")
+            for i, result in enumerate(results.page(1)):
+                if i >= 5:
+                    break
                 print(f"  Result {i+1}:")
-                if search_type == 'release':
+                if isinstance(result, discogs_client.models.Release):
                     print(f"    Title: {result.title}")
                     print(f"    Artist: {result.artists[0].name if result.artists else 'N/A'}")
                     print(f"    Year: {result.year}")
                     print(f"    Labels: {', '.join([l.name for l in result.labels])}")
-                elif search_type == 'artist':
+                elif isinstance(result, discogs_client.models.Artist):
                     print(f"    Name: {result.name}")
-                    print(f"    Profile: {result.profile}")
-                elif search_type == 'master':
+                elif isinstance(result, discogs_client.models.Master):
                     print(f"    Title: {result.title}")
                     print(f"    Artist: {result.artists[0].name if result.artists else 'N/A'}")
                     print(f"    Year: {result.year}")
-                # You can access more attributes as needed
         else:
             print(f"  No {search_type} results found for '{query}'.")
     except Exception as e:
