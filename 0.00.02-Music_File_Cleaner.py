@@ -14,22 +14,33 @@ def search_discogs(query, search_type='release'):
     try:
         results = d.search(query, type=search_type)
         if results:
-            print(f"Found {results.count} results. Showing the first 5:")
-            for i, result in enumerate(results.page(1)):
-                if i >= 5:
-                    break
-                print(f"  Result {i+1}:")
+            print(f"Found {results.count} results. Filtering for 45rpm releases with label images...")
+            found_count = 0
+            for result in results.page(1):
                 if isinstance(result, discogs_client.models.Release):
-                    print(f"    Title: {result.title}")
-                    print(f"    Artist: {result.artists[0].name if result.artists else 'N/A'}")
-                    print(f"    Year: {result.year}")
-                    print(f"    Labels: {', '.join([l.name for l in result.labels])}")
-                elif isinstance(result, discogs_client.models.Artist):
-                    print(f"    Name: {result.name}")
-                elif isinstance(result, discogs_client.models.Master):
-                    print(f"    Title: {result.title}")
-                    print(f"    Artist: {result.artists[0].name if result.artists else 'N/A'}")
-                    print(f"    Year: {result.year}")
+                    # Check for 45rpm format
+                    is_45rpm = False
+                    if result.formats:
+                        for format in result.formats:
+                            if format.get('name') == 'Vinyl' and '7"' in format.get('descriptions', []) and '45 RPM' in format.get('descriptions', []):
+                                is_45rpm = True
+                                break
+                    
+                    if is_45rpm:
+                        # Check for label images
+                        if result.images:
+                            for image in result.images:
+                                if image.get('type') == 'label' or 'label' in image.get('uri', ''):
+                                    found_count += 1
+                                    print(f"\n--- Found 45rpm release with label image ---")
+                                    print(f"    Title: {result.title}")
+                                    print(f"    Artist: {result.artists[0].name if result.artists else 'N/A'}")
+                                    print(f"    Year: {result.year}")
+                                    print(f"    Labels: {', '.join([l.name for l in result.labels])}")
+                                    print(f"    Image URL: {image.get('uri')}")
+                                    break # Move to the next release after finding one label image
+            if found_count == 0:
+                print("No 45rpm releases with label images found in the first page of results.")
         else:
             print(f"  No {search_type} results found for '{query}'.")
     except Exception as e:
