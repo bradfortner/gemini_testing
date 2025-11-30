@@ -1,6 +1,7 @@
 import pygame
 import discogs_client
 import config
+import json
 
 # Initialize Discogs client
 # The user token is now imported from config.py
@@ -45,8 +46,12 @@ def search_discogs(query, search_type='release'):
                 print("No 45rpm releases with label images found in the first page of results.")
         else:
             print(f"  No {search_type} results found for '{query}'.")
+    except json.JSONDecodeError:
+        print("\nError: Could not decode the response from Discogs.")
+        print("This might be due to an invalid API token, rate limiting, or network issues.")
+        print("Please check your API token in config.py and your internet connection.")
     except Exception as e:
-        print(f"Error searching Discogs: {e}")
+        print(f"An unexpected error occurred: {e}")
 
 
 class InputBox:
