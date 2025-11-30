@@ -14,9 +14,11 @@ def search_discogs(query, search_type='release'):
     try:
         results = d.search(query, type=search_type)
         if results:
-            print(f"Found {results.count} results. Filtering for 45rpm releases with label images...")
+            print(f"Found {results.count} results. Filtering for 45rpm releases with label images. Showing up to 20 matches:")
             found_count = 0
             for result in results.page(1):
+                if found_count >= 20: # Limit to first 20 results
+                    break
                 if isinstance(result, discogs_client.models.Release):
                     # Check for 45rpm format
                     is_45rpm = False
