@@ -15,7 +15,7 @@ def search_discogs(query, search_type='release'):
     try:
         results = d.search(query, type=search_type)
         if results:
-            print(f"Found {results.count} results. Filtering for 45rpm releases with label images. Showing up to 20 matches:")
+            print(f"Found {results.count} results. Filtering for 45rpm releases. Showing up to 20 matches:")
             found_count = 0
             for result in results.page(1):
                 if found_count >= 20: # Limit to first 20 results
@@ -30,20 +30,21 @@ def search_discogs(query, search_type='release'):
                                 break
                     
                     if is_45rpm:
-                        # Check for label images
+                        found_count += 1
+                        print(f"\n--- Found 45rpm release ---")
+                        print(f"    Title: {result.title}")
+                        print(f"    Artist: {result.artists[0].name if result.artists else 'N/A'}")
+                        print(f"    Year: {result.year}")
+                        print(f"    Labels: {', '.join([l.name for l in result.labels])}")
                         if result.images:
+                            print("    Images:")
                             for image in result.images:
-                                if image.get('type') == 'label' or 'label' in image.get('uri', ''):
-                                    found_count += 1
-                                    print(f"\n--- Found 45rpm release with label image ---")
-                                    print(f"    Title: {result.title}")
-                                    print(f"    Artist: {result.artists[0].name if result.artists else 'N/A'}")
-                                    print(f"    Year: {result.year}")
-                                    print(f"    Labels: {', '.join([l.name for l in result.labels])}")
-                                    print(f"    Image URL: {image.get('uri')}")
-                                    break # Move to the next release after finding one label image
+                                print(f"      - {image.get('uri')}")
+                        else:
+                            print("    No images found for this release.")
+
             if found_count == 0:
-                print("No 45rpm releases with label images found in the first page of results.")
+                print("No 45rpm releases found in the first page of results.")
         else:
             print(f"  No {search_type} results found for '{query}'.")
     except json.JSONDecodeError:
