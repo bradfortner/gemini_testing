@@ -4,6 +4,7 @@ import config
 import json
 import requests
 import io
+import datetime # Import datetime for time calculations
 
 # Initialize Discogs client
 d = discogs_client.Client('YourApp/1.0', user_token=config.DISCOGS_USER_TOKEN)
@@ -40,40 +41,37 @@ def search_discogs(query, search_type='release'):
 class InputBox:
     def __init__(self, x, y, w, h, text=''):
         self.rect = pygame.Rect(x, y, w, h)
-        self.color = COLOR_INACTIVE
         self.text = text
         self.placeholder_text = text
-        self.txt_surface = FONT.render(text, True, self.color)
-        self.active = False
         self.focused = False
 
     def handle_event(self, event):
         if event.type == pygame.MOUSEBUTTONDOWN:
             if self.rect.collidepoint(event.pos):
-                self.active = not self.active
-                if self.active and self.text == self.placeholder_text:
-                    self.text = ''
+                self.focused = True
             else:
-                self.active = False
-            self.color = COLOR_ACTIVE if self.active else COLOR_INACTIVE
-        if event.type == pygame.KEYDOWN:
-            if self.active:
-                if event.key == pygame.K_RETURN:
-                    return "search"
-                elif event.key == pygame.K_BACKSPACE:
-                    self.text = self.text[:-1]
-                else:
-                    self.text += event.unicode
-        self.txt_surface = FONT.render(self.text, True, (255,255,255))
+                self.focused = False
+        
+        if event.type == pygame.KEYDOWN and self.focused:
+            if event.key == pygame.K_BACKSPACE:
+                self.text = self.text[:-1]
+            elif event.key not in (pygame.K_TAB, pygame.K_RETURN):
+                if self.text == self.placeholder_text:
+                    self.text = ''
+                self.text += event.unicode
         return None
 
-    def update(self):
-        width = max(200, self.txt_surface.get_width()+10)
-        self.rect.w = width
-
     def draw(self, screen):
-        screen.blit(self.txt_surface, (self.rect.x+5, self.rect.y+5))
-        pygame.draw.rect(screen, self.color if self.active or self.focused else COLOR_INACTIVE, self.rect, 2)
+        display_text = self.text
+        text_color = (255, 255, 255)
+        if self.text == '' and not self.focused:
+            display_text = self.placeholder_text
+            text_color = (150, 150, 150) # Dim color for placeholder
+        
+        txt_surface = FONT.render(display_text, True, text_color)
+        screen.blit(txt_surface, (self.rect.x+5, self.rect.y+5))
+        pygame.draw.rect(screen, COLOR_ACTIVE if self.focused else COLOR_INACTIVE, self.rect, 2)
+
 
 class Button:
     def __init__(self, x, y, w, h, text=''):
@@ -84,8 +82,9 @@ class Button:
     def draw(self, screen):
         color = COLOR_ACTIVE if self.focused else COLOR_INACTIVE
         pygame.draw.rect(screen, color, self.rect)
-        search_text = FONT.render(self.text, True, (255, 255, 255))
-        screen.blit(search_text, (self.rect.x + 30, self.rect.y + 5))
+        text_surf = FONT.render(self.text, True, (255, 255, 255))
+        text_rect = text_surf.get_rect(center=self.rect.center)
+        screen.blit(text_surf, text_rect)
 
 class Checkbox:
     def __init__(self, x, y, w, h, text=''):
@@ -94,14 +93,21 @@ class Checkbox:
         self.checked = False
         self.focused = False
 
-    def handle_event(self, event):
+    def handle_event(self, event, checkboxes):
+        toggled = False
         if event.type == pygame.MOUSEBUTTONDOWN:
             if self.rect.collidepoint(event.pos):
-                self.checked = not self.checked
+                toggled = True
         if event.type == pygame.KEYDOWN:
             if self.focused and event.key == pygame.K_RETURN:
-                self.checked = not self.checked
-
+                toggled = True
+        
+        if toggled:
+            self.checked = not self.checked
+            if self.checked:
+                for cb in checkboxes:
+                    if cb != self:
+                        cb.checked = False
 
     def draw(self, screen):
         color = COLOR_ACTIVE if self.focused else COLOR_INACTIVE
@@ -116,32 +122,68 @@ class ResultsViewer:
         self.results = results
         self.font = pygame.font.Font(None, 24)
         self.back_button = Button(10, 10, 100, 32, "Back")
+        self.select_button = Button(screen.get_width() - 110, screen.get_height() - 42, 100, 32, "Select")
         self.checkboxes = []
+        self.images = self._load_images()
         y_offset = 50
         for i, result in enumerate(self.results):
-            self.checkboxes.append(Checkbox(50, y_offset, 20, 20))
+            self.checkboxes.append(Checkbox(50, y_offset + 15, 20, 20))
             y_offset += 60
+        self.focusable_widgets = self.checkboxes + [self.back_button, self.select_button]
         self.focused_index = 0
-        if self.checkboxes:
-            self.checkboxes[self.focused_index].focused = True
+        if self.focusable_widgets:
+            self.focusable_widgets[self.focused_index].focused = True
+
+    def _load_images(self):
+        images = []
+        for result in self.results:
+            image_surface = None
+            if hasattr(result, 'images') and result.images:
+                image_url = result.images[0]['uri']
+                try:
+                    headers = {'User-Agent': 'YourApp/1.0'}
+                    response = requests.get(image_url, headers=headers)
+                    response.raise_for_status()
+                    image_data = response.content
+                    image_file = io.BytesIO(image_data)
+                    image_surface = pygame.image.load(image_file)
+                except Exception as e:
+                    print(f"Error loading image: {e}")
+            if image_surface:
+                images.append(pygame.transform.scale(image_surface, (50, 50)))
+            else:
+                placeholder = pygame.Surface((50, 50))
+                placeholder.fill((50, 50, 50))
+                images.append(placeholder)
+        return images
 
     def handle_event(self, event):
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_TAB:
-                self.checkboxes[self.focused_index].focused = False
-                self.focused_index = (self.focused_index + 1) % len(self.checkboxes)
-                self.checkboxes[self.focused_index].focused = True
+                if self.focusable_widgets:
+                    self.focusable_widgets[self.focused_index].focused = False
+                    self.focused_index = (self.focused_index + 1) % len(self.focusable_widgets)
+                    self.focusable_widgets[self.focused_index].focused = True
             elif event.key == pygame.K_RETURN:
-                 if self.checkboxes:
-                    self.checkboxes[self.focused_index].handle_event(event)
-
+                focused_widget = self.focusable_widgets[self.focused_index]
+                if focused_widget == self.select_button:
+                     for i, cb in enumerate(self.checkboxes):
+                        if cb.checked:
+                            return "view_details", self.results[i]
+                elif focused_widget == self.back_button:
+                    return "back", None
+        
         for cb in self.checkboxes:
-            cb.handle_event(event)
+            cb.handle_event(event, self.checkboxes)
 
         if event.type == pygame.MOUSEBUTTONDOWN:
             if self.back_button.rect.collidepoint(event.pos):
-                return "back"
-        return None
+                return "back", None
+            if self.select_button.rect.collidepoint(event.pos):
+                for i, cb in enumerate(self.checkboxes):
+                    if cb.checked:
+                        return "view_details", self.results[i]
+        return None, None
 
     def draw(self):
         if not self.results:
@@ -151,12 +193,108 @@ class ResultsViewer:
             y_offset = 50
             for i, result in enumerate(self.results):
                 self.checkboxes[i].draw(self.screen)
-                title_surface = self.font.render(f"Title: {result.title}", True, (255, 255, 255))
-                artist_surface = self.font.render(f"Artist: {result.artists[0].name if result.artists else 'N/A'}", True, (255, 255, 255))
-                year_surface = self.font.render(f"Year: {result.year if result.year else 'N/A'}", True, (255, 255, 255))
-                self.screen.blit(title_surface, (80, y_offset))
-                self.screen.blit(artist_surface, (80, y_offset + 20))
+                self.screen.blit(self.images[i], (80, y_offset))
+                title = getattr(result, 'title', 'N/A').encode('latin-1', 'replace').decode('latin-1')
+                artist = 'N/A'
+                if hasattr(result, 'artists') and result.artists:
+                    artist = result.artists[0].name.encode('latin-1', 'replace').decode('latin-1')
+                title_surface = self.font.render(f"Title: {title}", True, (255, 255, 255))
+                artist_surface = self.font.render(f"Artist: {artist}", True, (255, 255, 255))
+                self.screen.blit(title_surface, (140, y_offset))
+                self.screen.blit(artist_surface, (140, y_offset + 20))
                 y_offset += 60
+
+        self.back_button.draw(self.screen)
+        self.select_button.draw(self.screen)
+
+class DetailsViewer:
+    def __init__(self, screen, result):
+        self.screen = screen
+        self.result = result
+        self.font = pygame.font.Font(None, 32)
+        self.back_button = Button(10, 10, 100, 32, "Back")
+        
+        # Fetch full release details for comprehensive data
+        self.full_release = d.release(self.result.id) 
+        self.image_surface = self._load_image()
+        self.song_length, self.genres = self._get_song_length_and_genres()
+
+    def _load_image(self):
+        if hasattr(self.full_release, 'images') and self.full_release.images:
+            image_url = self.full_release.images[0]['uri']
+            try:
+                headers = {'User-Agent': 'YourApp/1.0'}
+                response = requests.get(image_url, headers=headers)
+                response.raise_for_status()
+                image_data = response.content
+                image_file = io.BytesIO(image_data)
+                return pygame.image.load(image_file)
+            except Exception as e:
+                print(f"Error loading image: {e}")
+        return None
+    
+    def _get_song_length_and_genres(self):
+        total_duration_seconds = 0
+        genres = []
+
+        if hasattr(self.full_release, 'tracklist') and self.full_release.tracklist:
+            for track in self.full_release.tracklist:
+                if track.duration:
+                    try:
+                        # Parse duration string "mm:ss"
+                        minutes, seconds = map(int, track.duration.split(':'))
+                        total_duration_seconds += (minutes * 60) + seconds
+                    except ValueError:
+                        # Handle cases where duration might be in an unexpected format
+                        pass
+        
+        if hasattr(self.full_release, 'genres') and self.full_release.genres:
+            genres = self.full_release.genres
+
+        # Convert total seconds back to "HH:MM:SS" or "MM:SS"
+        if total_duration_seconds > 0:
+            total_duration = str(datetime.timedelta(seconds=total_duration_seconds))
+            if len(total_duration.split(':')) == 2: # "M:SS" -> "MM:SS"
+                 total_duration = "0" + total_duration
+        else:
+            total_duration = "N/A"
+        
+        return total_duration, genres
+
+    def handle_event(self, event):
+        if event.type == pygame.MOUSEBUTTONDOWN and self.back_button.rect.collidepoint(event.pos):
+            return "back_to_results"
+        if event.type == pygame.KEYDOWN and event.key == pygame.K_RETURN:
+             return "back_to_results"
+        return None
+
+    def draw(self):
+        if self.image_surface:
+            self.screen.blit(pygame.transform.scale(self.image_surface, (400, 400)), (50, 50))
+        else:
+            pygame.draw.rect(self.screen, (50,50,50), (50, 50, 400, 400))
+            error_text = self.font.render("Image not available", True, (255,255,255))
+            self.screen.blit(error_text, (100, 200))
+        
+        title = getattr(self.full_release, 'title', 'N/A').encode('latin-1', 'replace').decode('latin-1')
+        artist = 'N/A'
+        if hasattr(self.full_release, 'artists') and self.full_release.artists:
+            artist = self.full_release.artists[0].name.encode('latin-1', 'replace').decode('latin-1')
+        year = getattr(self.full_release, 'year', 'N/A')
+        
+        genres_text = ", ".join(self.genres) if self.genres else "N/A"
+
+        title_surface = self.font.render(f"Title: {title}", True, (255, 255, 255))
+        artist_surface = self.font.render(f"Artist: {artist}", True, (255, 255, 255))
+        year_surface = self.font.render(f"Year: {year}", True, (255, 255, 255))
+        length_surface = self.font.render(f"Length: {self.song_length}", True, (255, 255, 255))
+        genre_surface = self.font.render(f"Genre: {genres_text}", True, (255, 255, 255))
+        
+        self.screen.blit(title_surface, (470, 50))
+        self.screen.blit(artist_surface, (470, 90))
+        self.screen.blit(year_surface, (470, 130))
+        self.screen.blit(length_surface, (470, 170))
+        self.screen.blit(genre_surface, (470, 210))
 
         self.back_button.draw(self.screen)
 
@@ -174,61 +312,88 @@ def main():
     title_box = InputBox(100, 200, 140, 32, 'Title')
     search_button = Button(100, 300, 140, 32, 'Search')
     
-    focusable_widgets = [artist_box, title_box, search_button]
-    focused_widget_index = 0
-    focusable_widgets[focused_widget_index].focused = True
-    artist_box.active = True
-
+    focusable_widgets_input = [artist_box, title_box, search_button]
+    focused_widget_index_input = 0
+    focusable_widgets_input[focused_widget_index_input].focused = True
 
     results_viewer = None
+    details_viewer = None
     app_state = "input"
 
     done = False
     while not done:
-        for event in pygame.event.get():
+        events = pygame.event.get()
+        for event in events:
             if event.type == pygame.QUIT:
                 done = True
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     done = True
-                if app_state == "input":
-                    if event.key == pygame.K_TAB:
-                        focusable_widgets[focused_widget_index].focused = False
-                        focusable_widgets[focused_widget_index].active = False
-                        focused_widget_index = (focused_widget_index + 1) % len(focusable_widgets)
-                        focusable_widgets[focused_widget_index].focused = True
-                        if isinstance(focusable_widgets[focused_widget_index], InputBox):
-                            focusable_widgets[focused_widget_index].active = True
-                    elif event.key == pygame.K_RETURN:
-                        if focusable_widgets[focused_widget_index] == search_button:
-                            search_query = f"{artist_box.text} - {title_box.text}"
-                            results = search_discogs(search_query)
-                            results_viewer = ResultsViewer(screen, results)
-                            app_state = "results"
-
+            
             if app_state == "input":
-                for box in focusable_widgets[:2]:
-                    box.handle_event(event)
+                focused_widget = focusable_widgets_input[focused_widget_index_input]
+                
+                if event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_TAB:
+                        focused_widget.focused = False
+                        focused_widget_index_input = (focused_widget_index_input + 1) % len(focusable_widgets_input)
+                        focusable_widgets_input[focused_widget_index_input].focused = True
+                    elif event.key == pygame.K_RETURN:
+                        if focused_widget == search_button:
+                            app_state = "searching"
+                
+                for widget in focusable_widgets_input:
+                    widget.handle_event(event)
+
                 if event.type == pygame.MOUSEBUTTONDOWN:
-                    if search_button.rect.collidepoint(event.pos):
-                        search_query = f"{artist_box.text} - {title_box.text}"
-                        results = search_discogs(search_query)
-                        results_viewer = ResultsViewer(screen, results)
-                        app_state = "results"
+                    for i, widget in enumerate(focusable_widgets_input):
+                        if widget.rect.collidepoint(event.pos):
+                            for fw in focusable_widgets_input: # Unfocus all
+                                fw.focused = False
+                            focused_widget_index_input = i
+                            widget.focused = True
+                            if widget == search_button:
+                                app_state = "searching"
+            
             elif app_state == "results":
                 if results_viewer:
-                    action = results_viewer.handle_event(event)
+                    action, data = results_viewer.handle_event(event)
                     if action == "back":
                         app_state = "input"
+                    elif action == "view_details":
+                        details_viewer = DetailsViewer(screen, data)
+                        app_state = "details"
+            
+            elif app_state == "details":
+                if details_viewer:
+                    action = details_viewer.handle_event(event)
+                    if action == "back_to_results":
+                        app_state = "results"
 
         screen.fill((30, 30, 30))
 
         if app_state == "input":
-            for widget in focusable_widgets:
+            for widget in focusable_widgets_input:
                 widget.draw(screen)
+        
+        elif app_state == "searching":
+            searching_text = FONT.render("Searching...", True, (255, 255, 255))
+            text_rect = searching_text.get_rect(center=screen.get_rect().center)
+            screen.blit(searching_text, text_rect)
+            pygame.display.flip() 
+            
+            search_query = f"{artist_box.text} - {title_box.text}"
+            results = search_discogs(search_query)
+            results_viewer = ResultsViewer(screen, results)
+            app_state = "results"
+
         elif app_state == "results":
             if results_viewer:
                 results_viewer.draw()
+
+        elif app_state == "details":
+            if details_viewer:
+                details_viewer.draw()
 
         pygame.display.flip()
 
