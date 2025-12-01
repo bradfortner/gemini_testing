@@ -9,17 +9,17 @@ import datetime # Import datetime for time calculations
 # Initialize Discogs client
 d = discogs_client.Client('YourApp/1.0', user_token=config.DISCOGS_USER_TOKEN)
 
-def search_discogs(query, search_type='release'):
+def search_discogs(query, page=1, search_type='release'):
     """
-    Searches the Discogs database for releases and returns a list of 45rpm releases.
+    Searches the Discogs database for releases and returns a list of 45rpm releases for a given page.
     """
-    print(f"\nSearching Discogs for '{query}' (type: {search_type})...")
+    print(f"\nSearching Discogs for '{query}' (page: {page}, type: {search_type})...")
     release_list = []
     try:
         results = d.search(query, type=search_type)
-        if results:
-            print(f"Found {results.count} results. Filtering for 45rpm releases.")
-            for result in results.page(1):
+        if results and page <= results.pages:
+            print(f"Found {results.count} results. Filtering for 45rpm releases on page {page}.")
+            for result in results.page(page):
                 if len(release_list) >= 10:
                     break
                 if isinstance(result, discogs_client.models.Release):
@@ -31,9 +31,9 @@ def search_discogs(query, search_type='release'):
                         release_list.append(result)
 
             if not release_list:
-                print("No 45rpm releases found in the first page of results.")
+                print(f"No 45rpm releases found on page {page}.")
         else:
-            print(f"  No {search_type} results found for '{query}'.")
+            print(f"  No {search_type} results found for '{query}' or page {page} out of range.")
     except Exception as e:
         print(f"An unexpected error occurred during search: {e}")
     return release_list
@@ -79,6 +79,11 @@ class Button:
         self.text = text
         self.focused = False
 
+    def handle_event(self, event):
+        # Buttons are handled by the main loop based on focus/clicks, 
+        # but this method prevents AttributeErrors in the event loop.
+        pass
+
     def draw(self, screen):
         color = COLOR_ACTIVE if self.focused else COLOR_INACTIVE
         pygame.draw.rect(screen, color, self.rect)
@@ -123,13 +128,16 @@ class ResultsViewer:
         self.font = pygame.font.Font(None, 24)
         self.back_button = Button(10, 10, 100, 32, "Back")
         self.select_button = Button(screen.get_width() - 110, screen.get_height() - 42, 100, 32, "Select")
+        self.next_button = Button(screen.get_width() - 220, screen.get_height() - 42, 100, 32, "Next 10")
+        
         self.checkboxes = []
         self.images = self._load_images()
         y_offset = 50
         for i, result in enumerate(self.results):
             self.checkboxes.append(Checkbox(50, y_offset + 15, 20, 20))
             y_offset += 60
-        self.focusable_widgets = self.checkboxes + [self.back_button, self.select_button]
+        
+        self.focusable_widgets = self.checkboxes + [self.back_button, self.select_button, self.next_button]
         self.focused_index = 0
         if self.focusable_widgets:
             self.focusable_widgets[self.focused_index].focused = True
@@ -172,7 +180,9 @@ class ResultsViewer:
                             return "view_details", self.results[i]
                 elif focused_widget == self.back_button:
                     return "back", None
-        
+                elif focused_widget == self.next_button:
+                    return "next_page", None
+
         for cb in self.checkboxes:
             cb.handle_event(event, self.checkboxes)
 
@@ -183,6 +193,9 @@ class ResultsViewer:
                 for i, cb in enumerate(self.checkboxes):
                     if cb.checked:
                         return "view_details", self.results[i]
+            if self.next_button.rect.collidepoint(event.pos):
+                return "next_page", None
+
         return None, None
 
     def draw(self):
@@ -206,6 +219,7 @@ class ResultsViewer:
 
         self.back_button.draw(self.screen)
         self.select_button.draw(self.screen)
+        self.next_button.draw(self.screen)
 
 class DetailsViewer:
     def __init__(self, screen, result):
@@ -319,6 +333,8 @@ def main():
     results_viewer = None
     details_viewer = None
     app_state = "input"
+    search_query = ""
+    current_page = 1
 
     done = False
     while not done:
@@ -333,6 +349,9 @@ def main():
             if app_state == "input":
                 focused_widget = focusable_widgets_input[focused_widget_index_input]
                 
+                for widget in focusable_widgets_input:
+                    widget.handle_event(event)
+
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_TAB:
                         focused_widget.focused = False
@@ -340,19 +359,19 @@ def main():
                         focusable_widgets_input[focused_widget_index_input].focused = True
                     elif event.key == pygame.K_RETURN:
                         if focused_widget == search_button:
+                            current_page = 1
+                            search_query = f"{artist_box.text} - {title_box.text}"
                             app_state = "searching"
                 
-                for widget in focusable_widgets_input:
-                    widget.handle_event(event)
-
                 if event.type == pygame.MOUSEBUTTONDOWN:
                     for i, widget in enumerate(focusable_widgets_input):
                         if widget.rect.collidepoint(event.pos):
-                            for fw in focusable_widgets_input: # Unfocus all
-                                fw.focused = False
+                            focusable_widgets_input[focused_widget_index_input].focused = False
                             focused_widget_index_input = i
                             widget.focused = True
                             if widget == search_button:
+                                current_page = 1
+                                search_query = f"{artist_box.text} - {title_box.text}"
                                 app_state = "searching"
             
             elif app_state == "results":
@@ -363,7 +382,9 @@ def main():
                     elif action == "view_details":
                         details_viewer = DetailsViewer(screen, data)
                         app_state = "details"
-            
+                    elif action == "next_page":
+                        app_state = "searching_next_page"
+
             elif app_state == "details":
                 if details_viewer:
                     action = details_viewer.handle_event(event)
@@ -376,14 +397,16 @@ def main():
             for widget in focusable_widgets_input:
                 widget.draw(screen)
         
-        elif app_state == "searching":
+        elif app_state == "searching" or app_state == "searching_next_page":
             searching_text = FONT.render("Searching...", True, (255, 255, 255))
             text_rect = searching_text.get_rect(center=screen.get_rect().center)
             screen.blit(searching_text, text_rect)
             pygame.display.flip() 
             
-            search_query = f"{artist_box.text} - {title_box.text}"
-            results = search_discogs(search_query)
+            if app_state == "searching_next_page":
+                current_page += 1
+            
+            results = search_discogs(search_query, page=current_page)
             results_viewer = ResultsViewer(screen, results)
             app_state = "results"
 
